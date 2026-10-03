@@ -1,0 +1,168 @@
+// Prisma schema file for HealthCart - MongoDB
+// Documentation: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PATIENT
+  DOCTOR
+  ADMIN
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum WaitlistStatus {
+  WAITING
+  NOTIFIED
+  BOOKED
+  EXPIRED
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  BOOKING_RESCHEDULED
+  APPOINTMENT_REMINDER
+  WAITLIST_AVAILABLE
+  GENERAL
+}
+
+model User {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(PATIENT)
+  phone        String?
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  doctor        Doctor?
+  appointments  Appointment[]  @relation("PatientAppointments")
+  waitlists     Waitlist[]
+  notifications Notification[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  token     String   @unique
+  userId    String   @map("user_id") @db.ObjectId
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Doctor {
+  id                 String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId             String  @unique @map("user_id") @db.ObjectId
+  specialization     String
+  experienceYears    Int     @default(0) @map("experience_years")
+  bio                String?
+  consultationFee    Float   @default(0) @map("consultation_fee")
+  isApprovalRequired Boolean @default(false) @map("is_approval_required")
+  avatarUrl          String? @map("avatar_url")
+  qualifications     String?
+
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  availability DoctorAvailability[]
+  leaves       DoctorLeave[]
+  appointments Appointment[]
+  waitlists    Waitlist[]
+
+  @@map("doctors")
+}
+
+model DoctorAvailability {
+  id                  String @id @default(auto()) @map("_id") @db.ObjectId
+  doctorId            String @map("doctor_id") @db.ObjectId
+  dayOfWeek           Int    @map("day_of_week") // 0=Sun, 1=Mon, ..., 6=Sat
+  startTime           String @map("start_time")  // "HH:MM" in 24h format
+  endTime             String @map("end_time")    // "HH:MM" in 24h format
+  slotDurationMinutes Int    @default(30) @map("slot_duration_minutes")
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, dayOfWeek, startTime])
+  @@map("doctor_availabilities")
+}
+
+model DoctorLeave {
+  id       String  @id @default(auto()) @map("_id") @db.ObjectId
+  doctorId String  @map("doctor_id") @db.ObjectId
+  date     String  // "YYYY-MM-DD" stored as string for timezone-safe comparison
+  reason   String?
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, date])
+  @@map("doctor_leaves")
+}
+
+model Appointment {
+  id           String            @id @default(auto()) @map("_id") @db.ObjectId
+  doctorId     String            @map("doctor_id") @db.ObjectId
+  patientId    String            @map("patient_id") @db.ObjectId
+  date         String            // "YYYY-MM-DD"
+  startTime    String            @map("start_time") // "HH:MM"
+  endTime      String            @map("end_time")   // "HH:MM"
+  status       AppointmentStatus @default(PENDING)
+  notes        String?
+  cancelReason String?           @map("cancel_reason")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  doctor  Doctor @relation(fields: [doctorId], references: [id])
+  patient User   @relation("PatientAppointments", fields: [patientId], references: [id])
+
+  @@unique([doctorId, date, startTime]) // conflict prevention
+  @@map("appointments")
+}
+
+model Waitlist {
+  id            String         @id @default(auto()) @map("_id") @db.ObjectId
+  doctorId      String         @map("doctor_id") @db.ObjectId
+  patientId     String         @map("patient_id") @db.ObjectId
+  requestedDate String         @map("requested_date") // "YYYY-MM-DD"
+  status        WaitlistStatus @default(WAITING)
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  doctor  Doctor @relation(fields: [doctorId], references: [id])
+  patient User   @relation(fields: [patientId], references: [id])
+
+  @@unique([doctorId, patientId, requestedDate])
+  @@map("waitlists")
+}
+
+model Notification {
+  id        String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String           @map("user_id") @db.ObjectId
+  message   String
+  type      NotificationType @default(GENERAL)
+  isRead    Boolean          @default(false) @map("is_read")
+  metadata  Json?
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
